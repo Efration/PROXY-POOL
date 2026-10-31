@@ -13,9 +13,6 @@ commits the survivors to `proxies.txt` when the file actually changed.
 There is **no speed test, no ranking, and no country detection**. The file is
 a pool of *usable* configs. Ranking is left to your client.
 
-**How to put this on GitHub:** see [`HOW_TO_RUN.md`](HOW_TO_RUN.md)
-(browser-only steps).
-
 ---
 
 ## Subscription URL
@@ -67,37 +64,6 @@ Examples:
 Because the repository is public, **source, config, and subscription URLs
 are visible**. Do not put private tokens or paid-subscription links in
 `subscriptions.txt`.
-
----
-
-## GitHub Actions usage (public repo)
-
-This project is designed to stay on **GitHub Free standard hosted runners**
-for a **public** repository.
-
-| Rule | This repo |
-|---|---|
-| Visibility | Must stay **Public** |
-| Runners | Every job uses `ubuntu-latest` only |
-| Larger / paid / self-hosted runners | Not used |
-| Private 2,000-minute allowance | Not used while the repo is public |
-| Update interval | `72` hours (every three days) |
-| Artifacts | Small JSON files, **1-day** retention, no Actions cache |
-| Extra paid GitHub products | None |
-
-If you switch the repository to **Private**, the same workflow starts using
-the 2,000-minute monthly cap. Keep it public.
-
-Standard runner minutes on public repos are free per GitHub’s billing docs.
-**Storage is not unlimited** (artifacts, Git LFS, Packages). This workflow
-uploads only short-lived JSON and does not use `actions/cache`. GitHub can
-still limit or disable Actions under their Terms and fair-use rules; this
-project does not try to bypass those rules.
-
-Docs: [Billing and usage](https://docs.github.com/en/actions/concepts/billing-and-usage),
-[GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
-
----
 
 ## Features
 
