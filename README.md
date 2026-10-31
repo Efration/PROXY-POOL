@@ -191,11 +191,3 @@ The file is overwritten on each successful update. Skip a line that fails in
 your client; the next run may drop it.
 
 ---
-
-## What this repository does not do
-
-- It does not split the worker and the list across two GitHub repositories
-- It does not hide `subscriptions.txt` or `config.json`
-- It does not rank proxies by speed or country
-- It does not require a personal access token for publishing (Actions commits
-  with `GITHUB_TOKEN` to this same repo)
