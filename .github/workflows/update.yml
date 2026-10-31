@@ -1,0 +1,221 @@
+name: Update proxy pool
+
+# Single PUBLIC repository. Standard GitHub-hosted runners only (ubuntu-latest).
+
+on:
+  schedule:
+    - cron: "13 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: proxy-pool-update
+  cancel-in-progress: false
+
+env:
+  FORCE_UPDATE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+  # Matrix jobs run in parallel. Raising this shortens wall-clock.
+  # config.json "test_workers" is threads inside each job, not extra runners.
+  TOTAL_SHARDS: 6
+
+jobs:
+  # --- Stage 1: Fetch ALL subscriptions, extract ALL configs (single job) --
+  prepare:
+    name: Prepare candidates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      should_run: ${{ steps.gate.outputs.should_run }}
+      candidate_count: ${{ steps.count.outputs.count }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Decide whether an update is due
+        id: gate
+        run: python -m worker.check_interval
+
+      - name: Install sing-box
+        if: steps.gate.outputs.should_run == 'true'
+        run: |
+          set -euo pipefail
+          VERSION="$(python -c "import json;print(json.load(open('config.json'))['sing_box_version'])")"
+          ARCHIVE="sing-box-${VERSION}-linux-amd64"
+          echo "Downloading sing-box ${VERSION}"
+          mkdir -p tools
+          curl -fsSL -o /tmp/sing-box.tgz \
+            "https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/${ARCHIVE}.tar.gz"
+          tar -xzf /tmp/sing-box.tgz -C tools
+          cp "tools/${ARCHIVE}/sing-box" tools/sing-box
+          chmod +x tools/sing-box
+          ./tools/sing-box version
+
+      - name: Fetch, parse, dedupe, classify & save candidates
+        if: steps.gate.outputs.should_run == 'true'
+        id: prepare
+        env:
+          SING_BOX_PATH: ${{ github.workspace }}/tools/sing-box
+        run: |
+          python -m worker.main --save-candidates candidates.json --verbose 2>&1 | tee prepare.log
+          echo "Extraction phase finished. Test shards start only after this job succeeds."
+
+      - name: Count candidates
+        if: steps.gate.outputs.should_run == 'true'
+        id: count
+        run: |
+          COUNT=$(python -c "
+          import json
+          data = json.load(open('candidates.json'))
+          n = len(data['candidates']) if isinstance(data, dict) else len(data)
+          print(n)
+          ")
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Total candidates assigned for later testing: $COUNT"
+
+      - name: Upload candidates artifact
+        if: steps.gate.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: candidates
+          path: candidates.json
+          retention-days: 1
+          compression-level: 9
+          if-no-files-found: error
+
+  # --- Stage 2: Parallel testing (matrix) -----------------------------------
+  test:
+    name: Test shard ${{ matrix.shard }}
+    needs: prepare
+    if: needs.prepare.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download candidates
+        uses: actions/download-artifact@v5
+        with:
+          name: candidates
+          path: .
+
+      - name: Install sing-box
+        run: |
+          set -euo pipefail
+          VERSION="$(python -c "import json;print(json.load(open('config.json'))['sing_box_version'])")"
+          ARCHIVE="sing-box-${VERSION}-linux-amd64"
+          echo "Downloading sing-box ${VERSION}"
+          mkdir -p tools
+          curl -fsSL -o /tmp/sing-box.tgz \
+            "https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/${ARCHIVE}.tar.gz"
+          tar -xzf /tmp/sing-box.tgz -C tools
+          cp "tools/${ARCHIVE}/sing-box" tools/sing-box
+          chmod +x tools/sing-box
+          ./tools/sing-box version
+
+      - name: Run shard test
+        env:
+          SING_BOX_PATH: ${{ github.workspace }}/tools/sing-box
+        run: |
+          python -m worker.main --candidates-file candidates.json --shard ${{ matrix.shard }} --total-shards ${{ env.TOTAL_SHARDS }} --verbose
+
+      - name: Upload partial outcomes
+        uses: actions/upload-artifact@v5
+        with:
+          name: outcomes-part-${{ matrix.shard }}
+          path: outcomes.part${{ matrix.shard }}.json
+          retention-days: 1
+          compression-level: 9
+          if-no-files-found: error
+
+  # --- Stage 3: Merge results & commit to this same public repository ------
+  merge:
+    name: Merge & commit
+    needs: [prepare, test]
+    if: needs.prepare.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+          ref: ${{ github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download all outcome artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: .
+          pattern: outcomes-part-*
+          merge-multiple: true
+
+      - name: Merge outcomes & write proxies.txt
+        run: python -m worker.merge_results --total-shards ${{ env.TOTAL_SHARDS }}
+
+      - name: Commit and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+
+          if [ -z "$(git status --porcelain -- proxies.txt)" ]; then
+            echo "no changes to proxies.txt - skipping commit"
+            exit 0
+          fi
+
+          echo "proxies.txt changed - committing"
+          git add proxies.txt
+          git commit -m "chore(pool): auto-update proxies.txt"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+
+          for attempt in 1 2 3; do
+            git fetch origin "$BRANCH"
+            if git rebase "origin/${BRANCH}"; then
+              if git push origin "HEAD:${BRANCH}"; then
+                echo "pushed update"
+                exit 0
+              fi
+            else
+              echo "rebase failed on attempt ${attempt}"
+              git rebase --abort || true
+            fi
+            echo "push attempt ${attempt} failed - retrying after 5s"
+            sleep 5
+          done
+          echo "could not push after 3 attempts"
+          git status || true
+          git log -1 --oneline || true
+          exit 1
