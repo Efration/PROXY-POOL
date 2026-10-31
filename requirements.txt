@@ -1,0 +1,8 @@
+# proxy-pool-worker deliberately uses ONLY the Python standard library.
+# There are no third-party dependencies to install.
+# This file exists so the repository follows the conventional layout.
+#
+# The proxy connectivity tests are performed by the sing-box core binary,
+# which the GitHub Actions workflow downloads automatically
+# (see .github/workflows/update.yml and the "sing_box_version" key
+# in config.json).

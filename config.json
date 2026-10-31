@@ -1,0 +1,21 @@
+{
+  "update_interval_hours": 72,
+  "connectivity_timeout_seconds": 10,
+  "old_config_retries": 3,
+
+  "test_url": "https://www.gstatic.com/generate_204",
+  "test_workers": 16,
+
+  "sing_box_version": "1.10.7",
+  "sing_box_path": "sing-box",
+  "sing_box_startup_timeout_seconds": 5,
+
+  "fetch_timeout_seconds": 30,
+  "fetch_user_agent": "Mozilla/5.0 (compatible; proxy-pool-worker/1.1)",
+  "max_download_bytes": 8388608,
+
+  "port_pool_base": 44100,
+
+  "subscriptions_file": "subscriptions.txt",
+  "proxies_file": "proxies.txt"
+}

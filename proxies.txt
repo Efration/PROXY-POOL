@@ -1,0 +1,3 @@
+# This file is maintained automatically by the GitHub Actions workflow.
+# One proxy configuration per line. The comment below will be overwritten
+# on the first successful update run. You may also paste configs manually.
